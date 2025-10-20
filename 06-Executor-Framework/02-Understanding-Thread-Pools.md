@@ -43,6 +43,7 @@ Imagine a highway toll plaza.
 | `newCachedThreadPool()` | **Dynamically Sized** | Initially zero threads untayi. Task vachinappudu, khali thread unte reuse chestundi, lekapothe kotha thread create chestundi. 60 seconds varaku use cheyani threads ni terminate chestundi. | Short-lived, asynchronous tasks (e.g., I/O operations, handling multiple client requests). Tasks anevi fast ga complete avvali. |
 | `newSingleThreadExecutor()` | **Single Thread** | Okate worker thread untundi. Tasks anni sequential ga execute avtayi (FIFO order). Ee thread fail aythe, inkoti kothadi create avtundi. | Tasks anevi order lo execute avvali anukunappudu. (e.g., event logging). |
 | `newScheduledThreadPool(n)`| **Fixed Size, Scheduled**| `FixedThreadPool` laane, kaani tasks ni delay tho or periodic ga run cheyadaniki use avtundi. | Tasks ni future lo run cheyali anukunappudu or repeated ga run cheyali anukunappudu (e.g., health checks every 5 minutes). |
+| `newWorkStealingPool()`| **Work-Stealing** | Special `ForkJoinPool` ni create chestundi. Prathi thread ki oka own queue (deque) untundi. Oka thread pani aypothe, adi vere threads yokka queue nunchi pani "dongalistundi" (steals). | Recursive, divisible tasks (e.g., Fork/Join framework, parallel streams). High-performance, CPU-intensive parallel computations. |
 
 #### 🧠 Mental Model Diagram: Fixed vs Cached Pool
 
@@ -138,7 +139,7 @@ Number of CPU cores: 4
 Factorial of 11 is 39916800 | Executed by: pool-1-thread-1
 Factorial of 12 is 479001600 | Executed by: pool-1-thread-2
 Factorial of 13 is 6227020800 | Executed by: pool-1-thread-3
-Factorial of 14 is 87178291200 | Executed by: pool-1-thread-4
+Factorial of 14 is 87178291200 | Execed by: pool-1-thread-4
 Factorial of 15 is 1307674368000 | Executed by: pool-1-thread-1
 ... (threads will be reused)
 All tasks completed.
@@ -147,7 +148,59 @@ All tasks completed.
 
 ---
 
-### Example 2: `newCachedThreadPool` for I/O-Bound Tasks 🌐
+### Example 2: `newWorkStealingPool` for High Throughput 훔치는
+**Scenario:** `newWorkStealingPool` Java 8 lo vachindi and it's a bit special. It creates a `ForkJoinPool` with a parallelism level equal to the number of available CPU cores. The "work-stealing" idea is that if a thread finishes its own tasks, it can "steal" tasks from other threads' queues. This is great for improving throughput in parallel computations.
+
+```java
+// File: com/example/workstealing/WorkStealingDemo.java
+package com.example.workstealing;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+public class WorkStealingDemo {
+    public static void main(String[] args) {
+        int numCores = Runtime.getRuntime().availableProcessors();
+        System.out.println("Number of CPU cores: " + numCores);
+
+        // ✅ Creates a ForkJoinPool with parallelism = numCores
+        ExecutorService executor = Executors.newWorkStealingPool();
+
+        // Submit tasks that have varying completion times
+        for (int i = 1; i <= 20; i++) {
+            final int taskId = i;
+            executor.execute(() -> {
+                long sleepTime = 100 + (long) (Math.random() * 1000);
+                System.out.println("Executing task " + taskId + " on thread " + Thread.currentThread().getName() + " for " + sleepTime + "ms");
+                try {
+                    Thread.sleep(sleepTime);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+        }
+
+        // The main thread waits for the tasks to complete
+        // Note: ForkJoinPool threads are daemon threads by default,
+        // so the application would exit if the main thread doesn't wait.
+        // We use shutdown and awaitTermination for a graceful wait.
+        executor.shutdown();
+        try {
+            executor.awaitTermination(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        System.out.println("All tasks finished.");
+    }
+}
+```
+**Why This is Special:** Unlike `FixedThreadPool`, which has a single shared queue, each thread in a `WorkStealingPool` has its own double-ended queue (deque). A thread takes tasks from the head of its own deque. When its deque is empty, it looks at the *tail* of another thread's deque and "steals" a task. This reduces contention and improves CPU utilization, especially for tasks that can be broken down into smaller pieces (the core idea of the Fork/Join framework).
+
+---
+
+### Example 3: `newCachedThreadPool` for I/O-Bound Tasks 🌐
 
 **Scenario:** Oka list of URLs unnayi, manam prathi URL nunchi data download cheyali. Idi I/O-bound operation, ante thread network response kosam chala time wait chestu untundi.
 
